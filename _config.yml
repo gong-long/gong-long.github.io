@@ -1,6 +1,10 @@
 name: Herring Cove
 author: Herring Cove
-baseurl: http://laogong666.site
+#baseurl: 
+url: https://gong-long.github.io
+#url: http://127.0.0.1:4000
+#img_path: /
+
 description: theme for jekyll
 github: http://www.github.com/arnp
 twitter: http://www.twitter.com/
@@ -13,10 +17,18 @@ disqus: diqus-username
 ##Make sure to edit the above fields, especially for disqus.
 
 
-highlighter: pygments
-markdown: redcarpet
-redcarpet:
-  extensions: ["tables"]
+#highlighter: pygments
+#markdown: redcarpet
+#redcarpet:
+#  extensions: ["tables"]
+
+highlighter: rouge
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+
 
 defaults:
   - scope:
