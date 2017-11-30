@@ -1,0 +1,230 @@
+---
+title: varnish 基础
+---
+&emsp;**简介：**
+
+&emsp;&emsp;varnish是一款高性能且开源的反向代理服务器和HTTP加速器，据官网称可有300-1000倍的速度提升，其采用全新的软件体系机构，和现在的硬件体系紧密配合，与传统的squid相比，vanish具有性能更高、速度更快、管理更加方便等诸多优点。很多大型的网站都开始尝试使用vamish来替换印squid，这些都促进vanish迅速 发展起来。
+
+&emsp;**工作过程：**
+
+&emsp;&emsp;varnish与一般服务器软件类似，分为master进程和Child进程。master进程读入存储配置文件，调用合适的存储类型，然后创建／读入相应大小的缓存文件，接着master初始化管理该存储空间的结构体，然后fork并监控child进程。Child 进程在主线程的初始化的过程中，将前面打开的存储文件整个mmap 到内存中，此时创建并初始化空闲结构体，挂到存储管理结构体，以待分配。Child进程分配若干线程进行工作，主要包括一些管理线程和很多workcr线程。
+
+&emsp;&emsp;接着、开始真正的工作，varnish的某个负贵接收新HTTP连接线程开始等待用户，如果有新的HTTP连接过来，它总负责接收，然后唤醒某个等待中的线程，并把具体 的处理过程交给它。worker 线程读入HTTP请求的URL，查找已有的object。如果命中则直接返回并回复用户。如果没有命中，则需要将所请求的内容，从后端服务器中取过来，存到缓存中，然后再回复给用户。
+
+&emsp;**varnish 请求内部状态处理图：**
+![image](http://book.varnish-software.com/4.0/_images/simplified_fsm.svg)
+
+
+**各状态解释：**
+
+    状态引擎    | 功能分类
+ 
+	vcl_recv   | 请求被接入，但在其被分析、处理完成之前:定义如何服务、使用哪个后端主机为其服务
+ 
+	vcl_hash   | 查找缓存，调用内置hash_data函数，决定对什么内容hash计算,如后端存在虚拟主机：但用ip访问不能命中
+ 
+	vcl_hit    | 缓存命中
+ 
+	vcl_miss   | 缓存未命中
+ 
+	vcl_init   | 在装载vcl ,用其处理任何诸求之前 请求被接入
+ 
+	vcl_pipe   | 方法不理解 
+ 
+	vcl_pass   | 不查询缓存
+ 
+	vcl_purge  | 清理缓存
+ 
+	vcl_fetch  | 在后端服务器取内容，能让其可缓存或不缓存。从后端主机收到响应报文之前会被调用，返回的值可以为deliver,error code[reason],hit_for_pass,restart。
+ 
+	vcl_delier | 传送
+ 
+	vcl_error  | 错误处理机制
+　　　　　　　　　　
+ 
+&emsp;**安装varnish：**
+```
+yum install -y varnish
+```
+
+&emsp;**1、更改配置文件：** 
+```
+ vim /etc/varnish/varnish.params 
+
+# Varnish environment configuration description. This was derived from
+# the old style sysconfig/defaults settings
+
+# Set this to 1 to make systemd reload try to switch VCL without restart.
+RELOAD_VCL=1
+
+# Main configuration file. You probably want to change it.
+VARNISH_VCL_CONF=/etc/varnish/default.vcl
+
+# Default address and port to bind to. Blank address means all IPv4
+# and IPv6 interfaces, otherwise specify a host name, an IPv4 dotted
+# quad, or an IPv6 address in brackets.
+VARNISH_LISTEN_ADDRESS=192.168.1.5　　   #指定监听的前端服务器的地址
+VARNISH_LISTEN_PORT=80　　　　　　　　　　 #定义varnish 监听的端口
+
+# Admin interface listen address and port
+VARNISH_ADMIN_LISTEN_ADDRESS=127.0.0.1　　#定义管理此服务的地址
+VARNISH_ADMIN_LISTEN_PORT=6082
+
+# Shared secret file for admin interface
+VARNISH_SECRET_FILE=/etc/varnish/secret
+
+# Backend storage specification, see Storage Types in the varnishd(5)
+# man page for details.
+VARNISH_STORAGE="malloc,256M"　　　　　　#其中malloc是一个函数，为用户分配内存空间的大小
+
+ 
+
+# User and group for the varnishd worker processes
+VARNISH_USER=varnish
+VARNISH_GROUP=varnish
+
+# Other options, see the man page varnishd(1)
+#DAEMON_OPTS="-p thread_pool_min=5 -p thread_pool_max=500 -p thread_pool_timeout=300"　　#这里是定义CPU个数，最小线程个数，最大线程个数，线程的空闲时长
+```
+&emsp;**2、配置后端服务器，打开此服务：**
+```
+vim /etc/varsich/default.acl
+
+probe health {               #配置健康检测
+    .url = "/index.html";    #varnish检测的页面
+    .interval = 10s;         #检测的间隔时间
+    .timeout = 30ms;         #检测的超时时间
+    .window = 5;             #varnish会维持5个结果
+    .threshold = 3;          #至少有3次window检测是成功的，才算健康
+}      
+backend web1 {               #定义后端服务器1
+     .host = "172.16.1.20";
+     .port = "80";
+     .probe = health;             #调用健康模版
+     .connect_timeout = 1s;       #等待连接后端服务器的时间
+     .first_byte_timeout = 5s;    #等待backend传输过来第一个字节的时间
+     .between_bytes_timeout = 2s; #传输时字符之间的时间间隔
+}
+backend web2 {                    #定义后端服务器2
+     .host = "172.16.1.40";
+     .port = "80";
+     .probe = health;
+     .connect_timeout = 1s;
+     .first_byte_timeout = 5s;
+     .between_bytes_timeout = 2s;
+}
+ 
+ #配置完成之后还需在vcl_recv子模块中调用服务
+ 
+sub vcl_recv {
+ if (req.url ~ "*\.php"){　　 　　　#匹配有 .php 结尾的URL
+        set req.backend = web1;}　　#调用后端的第一个服务器
+ else{
+        set req.backend = web2;}　　#调用第二个服务器
+}
+ 
+定义命中请求后的策略
+sub vcl_hit {
+    if (req.request == "PURGE") {
+            purge;
+            error 200 "Purged.";
+    }
+}
+定义未命中请求的策略
+sub vcl_miss {
+    if (req.request == "PURGE") {
+            purge;
+            error 200 "Purged.";
+    }
+}
+```
+&emsp;**3、定义访问控制列表：**
+
+```
+vim /etc/varnish/default.vcl
+
+acl purge {
+       "localhost";
+       "127.0.0.1";
+       "172.16.1.0"/24;     #定义除了本机和172.16.1网段，其他网段全不能访问
+}  
+sub vcl_recv {
+       if (req.request == "PURGE") {
+            if (!client.ip ~ purge) {
+                   error 405 "Not allowed.";
+                     }
+               lookup;
+             }
+}
+
+此时，定义完成后服务就可以开启了。
+```
+
+&emsp;**4、打开服务**
+```
+systemctl start varnish
+```
+
+&emsp;**5、管理varnish：**
+```
+~# varnishadm -T 127.0.0.1:6082 -S /usr/local/varnish/etc/varnish/secret
+200 
+-----------------------------
+Varnish Cache CLI 1.0
+-----------------------------
+Linux,2.6.32-358.el6.x86_64,x86_64,-smalloc,-smalloc,-hcritbit
+varnish-3.0.5 revision 1a89b1f
+Type 'help' for command list.
+Type 'quit' to close CLI session.
+varnish> help　　   #查看管理命令
+```
+
+&emsp;**6、查询日志：**
+```
+[root@varnish ~]# varnishlog
+    0 Backend_health - web1 Still healthy 4--X-RH 5 3 5 0.001350 0.001759 HTTP/1.1 200 OK
+    0 Backend_health - web2 Still healthy 4--X-RH 5 3 5 0.003149 0.002433 HTTP/1.1 200 OK
+    9 SessionOpen  c 172.16.1.254 53905 0.0.0.0:80
+    9 ReqStart     c 172.16.1.254 53905 19241885
+    9 RxRequest    c GET
+    9 RxURL        c /
+    9 RxProtocol   c HTTP/1.1
+    9 RxHeader     c Accept: text/html, application/xhtml+xml, */*
+    9 RxHeader     c Accept-Language: zh-CN
+    9 RxHeader     c User-Agent: Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.1; WOW64; Trident/6.0)
+    9 RxHeader     c Accept-Encoding: gzip, deflate
+    9 RxHeader     c Host: 172.16.1.30
+    9 RxHeader     c If-Modified-Since: Tue, 04 Mar 2014 05:08:34 GMT
+    9 RxHeader     c If-None-Match: "40085-5-4f3c0e55fb165"
+    9 RxHeader     c DNT: 1
+    9 RxHeader     c Connection: Keep-Alive
+    9 VCL_call     c recv lookup
+    9 VCL_call     c hash
+    9 Hash         c /
+    9 Hash         c 172.16.1.30
+    9 VCL_return   c hash
+    9 Hit          c 19241876
+    9 VCL_call     c hit deliver
+    9 VCL_call     c deliver deliver
+    9 TxProtocol   c HTTP/1.1
+    9 TxStatus     c 304              #表示从缓存中取的数据
+    9 TxResponse   c Not Modified
+    9 TxHeader     c Server: Apache/2.2.15 (Red Hat)
+    9 TxHeader     c Last-Modified: Tue, 04 Mar 2014 05:08:34 GMT
+    9 TxHeader     c ETag: "40085-5-4f3c0e55fb165"
+    9 TxHeader     c Content-Type: text/html; charset=UTF-8
+    9 TxHeader     c Accept-Ranges: bytes
+    9 TxHeader     c Date: Sun, 23 Mar 2014 09:09:33 GMT
+    9 TxHeader     c X-Varnish: 19241885 19241876
+    9 TxHeader     c Age: 9
+    9 TxHeader     c Via: 1.1 varnish    9 TxHeader     c Connection: keep-alive
+    9 Length       c 0
+```
+
+&emsp;**7、状态查询:**
+```
+	~# varnishstat
+```
+![Image]({{ site.baseurl }}/Image/Varnish/varnish.jpg)
+
+
