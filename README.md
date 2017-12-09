@@ -1,4 +1,4 @@
-This repository is no longer maintained. 
+[这是我的个人博客站点](http://laogong666.site)
 ============
 
 Herring Cove
