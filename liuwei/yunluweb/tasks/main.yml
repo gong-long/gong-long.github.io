@@ -1,0 +1,122 @@
+---
+# tasks file for yunluweb
+# get repo from git
+# unzip war to tomcat_web_root
+# config nginx proxy
+
+- name: Create yunluweb_dir directory
+  file: path={{ yunluweb_dir }} state=directory
+
+- name: Create yunluweb_static_webroot directory
+  file: path={{ yunluweb_static_webroot }} state=directory
+
+- name: Install nfs client
+  yum: name={{item}} state=latest
+  with_items:
+    - nfs-utils
+
+- name: Copy static resource directory
+  synchronize:
+    src=files/yunlu
+    dest="{{ yunluweb_static_webroot }}"
+    delete=yes
+    recursive=yes
+    archive=no
+    links=yes
+
+# get war from http://10.17.4.205/aop/aop-webapp-hplus-1.2.0.war
+- name: download aop repo
+  get_url: url="{{ yunluweb_repo_url_prefix }}/{{ app_name }}" dest={{ yunluweb_dir }}
+
+- name: clear tomcat ROOT dir
+  shell: "rm -rf {{ tomcat_dir }}/webapps/ROOT/*"
+
+- name: unzip aop war
+  command: "unzip -oq {{ yunluweb_dir }}/{{ app_name }} -d {{ tomcat_dir }}/webapps/ROOT"
+
+- name: Copy config directory
+  synchronize:
+    src=files/conf
+    dest="{{ resty.prefix }}/nginx"
+    delete=yes
+    recursive=yes
+    archive=no
+    links=yes
+
+- name: Copy ssl start
+  copy:
+    src: files/_.casicloud.com_bundle.crt
+    dest: "{{ resty.prefix }}/nginx/conf/_.casicloud.com_bundle.crt"
+    owner: "{{ yunluweb_user }}"
+    group: "{{ yunluweb_group }}"
+
+- name: Copy ssl start
+  copy:
+    src: files/_.casicloud.com.key
+    dest: "{{ resty.prefix }}/nginx/conf/_.casicloud.com.key"
+    owner: "{{ yunluweb_user }}"
+    group: "{{ yunluweb_group }}"
+
+# nginx proxy config
+- name: Makesure conf direcoty exists
+  file: path="{{ resty.prefix }}/nginx/conf/conf.d" state=directory
+
+- name: Makesure cache direcoty exists
+  file: path="{{ resty.prefix }}/nginx/cache/tomcat" state=directory
+  #command: "mkdir -p {{ resty.prefix }}/nginx/conf/conf.d"
+  #ignore_errors: true
+
+- name: copy app config
+  template: src=templates/app/conf/app.properties.j2 dest="{{ tomcat_dir }}/webapps/ROOT/WEB-INF/classes/app.properties"
+
+- name: copy app web config
+  template: src=templates/app/conf/web.xml.j2 dest="{{ tomcat_dir }}/webapps/ROOT/WEB-INF/web.xml"
+
+- name: copy yunlu config
+  template: src=templates/app/conf/yunlu.properties.j2 dest="{{ tomcat_dir }}/webapps/ROOT/WEB-INF/classes/yunlu.properties"
+
+
+- name: add tomcat conf
+  template: src=templates/conf.d/tomcat.conf.j2 dest="{{ resty.prefix }}/nginx/conf/conf.d/tomcat.conf"
+- name: add tomcat_https conf
+  template: src=templates/conf.d/tomcat_https.conf.j2  dest="{{ resty.prefix }}/nginx/conf/conf.d/tomcat_https.conf"
+- name: Makesure nginx run deamon
+  replace: dest="{{ resty.prefix }}/nginx/conf/nginx.conf" regexp='daemon off;' replace='daemon on;' backup=yes
+
+- name: Configure Tomcat server
+  template: src=templates/tomcat/conf/server.xml.j2 dest="{{ tomcat_dir }}/conf/server.xml"
+
+- name: Configure Tomcat server
+  template: src=templates/tomcat/conf/context.xml.j2 dest="{{ tomcat_dir }}/conf/context.xml"
+
+- name: Configure Tomcat server web.xml
+  template: src=templates/tomcat/conf/web.xml.j2 dest="{{ tomcat_dir }}/conf/web.xml"
+
+- name: Change ownership of Tomcat installation
+  file: path="{{ tomcat_dir }}/" owner=tomcat group=tomcat state=directory recurse=yes
+
+- name: stop resty
+  shell: "ps aux | grep nginx | grep -v grep | awk '{print $2}' | xargs -n 1 kill -9"
+  ignore_errors: true
+
+- name: stop tomcat
+  command: /etc/init.d/tomcat stop
+
+- name: Change tomcat group gid to 9000
+  group: name={{ yunluweb_group }} gid={{ yunluweb_gid }} state=present
+
+- name: Change tomcat user uid to 9000
+  user: name={{ yunluweb_user }} uid={{ yunluweb_uid }} group={{ yunluweb_group }} state=present
+
+- name: restart tomcat
+  debug: msg="tomcat restart"
+  notify: restart tomcat
+  changed_when: true
+
+- name: Change ownership of nginx prfix
+  file: path="{{resty.prefix}}/nginx" owner={{ yunluweb_user }} group={{ yunluweb_group }} state=directory recurse=yes
+
+- name: start resty
+  command: "{{resty.prefix}}/nginx/sbin/nginx"
+  # become_user: tomcat
+  # become: true

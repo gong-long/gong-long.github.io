@@ -1,0 +1,70 @@
+---
+# tasks file for .
+- name: add group "tomcat"
+  group: name=tomcat
+
+- name: add user "tomcat"
+  user: name=tomcat group=tomcat home={{ tomcat_dir }} createhome=no
+  become: True
+  become_method: sudo
+
+- name: Download Tomcat
+  # http://archive.apache.org/dist/tomcat/tomcat-9/v9.0.0.M11/bin/apache-tomcat-9.0.0.M11.tar.gz
+  get_url: url=http://10.153.40.212/repo/tomcat/apache-tomcat-9.0.0.M11.tar.gz dest=/opt/apache-tomcat-9.0.0.M11.tar.gz
+
+- name: Extract archive
+  command: chdir=/usr/share /bin/tar xvf /opt/apache-tomcat-9.0.0.M11.tar.gz -C /opt/ creates=/opt/apache-tomcat-9.0.0.M11
+
+- name: Symlink install directory
+  file: src=/opt/apache-tomcat-9.0.0.M11 path={{tomcat_dir }} state=link
+
+- name: Change ownership of Tomcat installation
+  file: path="{{ tomcat_dir }}/" owner=tomcat group=tomcat state=directory recurse=yes
+
+- name: Configure Tomcat server
+  template: src=server.xml dest="{{ tomcat_dir }}/conf/"
+  notify: restart tomcat
+
+- name: Configure Tomcat users
+  template: src=tomcat-users.xml dest="{{ tomcat_dir }}/conf/"
+  notify: restart tomcat
+
+- name: Install Tomcat init script
+  template: src=tomcat-initscript.sh.j2 dest=/etc/init.d/tomcat mode=0755
+
+- name: Start Tomcat
+  #service: name=tomcat state=started enabled=yes
+  command: /etc/init.d/tomcat start
+
+- block:
+
+    - name: make sure /etc/profile.d exists
+      file: path=/etc/profile.d  state=directory
+
+    - name: export CATALINA_HOME
+      template:
+        src:  ../templates/tomcat_home.sh.j2
+        dest: /etc/profile.d/tomcat_home.sh
+        mode: "a+x"
+
+  when: tomcat_set_catalina_home
+
+- block:
+
+  - name: deploy iptables rules
+    template: src=iptables-save dest=/etc/sysconfig/iptables
+    when: "ansible_os_family == 'RedHat' and ansible_distribution_major_version == '6'"
+    notify: restart iptables
+
+  - name: insert firewalld rule for tomcat http port
+    firewalld: port={{ http_port }}/tcp permanent=true state=enabled immediate=yes
+    when: "ansible_os_family == 'RedHat' and ansible_distribution_major_version == '7'"
+
+  - name: insert firewalld rule for tomcat https port
+    firewalld: port={{ https_port }}/tcp permanent=true state=enabled immediate=yes
+    when: "ansible_os_family == 'RedHat' and ansible_distribution_major_version == '7'"
+
+  when: firewall_enable
+
+- name: wait for tomcat to start
+  wait_for: port={{http_port}}

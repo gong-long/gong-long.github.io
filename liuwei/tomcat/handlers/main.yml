@@ -1,0 +1,7 @@
+---
+- name: restart tomcat
+  #service: name=tomcat state=restarted
+  command: /etc/init.d/tomcat restart
+
+- name: restart iptables
+  service: name=iptables state=restarted

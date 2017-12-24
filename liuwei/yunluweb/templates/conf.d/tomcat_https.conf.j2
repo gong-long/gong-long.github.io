@@ -1,0 +1,109 @@
+server {
+  listen      443;
+	server_name	in.casicloud.com;
+	root {{ resty.prefix }}/nginx/html/yunlu;
+	add_header	Content-Security-Policy	upgrade-insecure-requests	always;
+	ssl on;
+	ssl_certificate _.casicloud.com_bundle.crt;
+	ssl_certificate_key _.casicloud.com.key;
+
+	access_log logs/{{ ansible_hostname }}.https.tomcat.access.log tomcat;
+
+	#baidu tools
+	location = /baidu_verify_wEVOTSOeVf.html {
+          echo wEVOTSOeVf;
+  }
+
+  #casimcloud
+  location /cosimcloud {
+		rewrite ^/cosimcloud/(.*) http://core.casicloud.com/cosimcloud/$1 permanent;
+	}
+
+  location /industryMall {
+		rewrite ^/industryMall/(.*) http://core.casicloud.com/industryMall/$1 permanent;
+	}
+
+  location /zone {
+		rewrite ^/zone/(.*) http://core.casicloud.com/zone/$1 permanent;
+	}
+
+  location /pages/nankang {
+		rewrite ^/pages/nankang/(.*) http://core.casicloud.com/pages/nankang/$1 permanent;
+	}
+
+  location /cloud/message {
+		rewrite ^/cloud/message/(.*) http://core.casicloud.com/cloud/message/$1 permanent;
+	}
+
+  location /autonomousControl {
+		rewrite ^/autonomousControl(.*) http://core.casicloud.com/autonomousControl$1 permanent;
+	}
+
+	location /sitemap {
+		try_files $uri @coresitemap;
+	}
+
+  location @coresitemap {
+		rewrite ^/sitemap/(.*) http://core.casicloud.com/sitemap/$1 redirect;
+	}
+
+  location /manager {
+		include acl.conf;
+		proxy_pass        http://127.0.0.1:8080/manager;
+	}
+
+	location ~* /upload/.*$ {
+		root	{{ yunluweb_upload_root }}/../;
+	}
+
+	# rewrite gov
+	location /gov {
+		rewrite ^/gov/(.*) https://in.casicloud.com/gov/$1 permanent;
+	}
+
+	#rewrite cloud
+	location /cloud {
+		rewrite ^/cloud/(.*) https://core.casicloud.com/cloud/$1 permanent;
+	}
+
+	location / {
+		proxy_set_header  		Host             $host;
+		proxy_pass        http://127.0.0.1:8080;
+	}
+
+	location ~* \.(gif|jpg|jpeg|png|js|css)$ {
+		access_log logs/{{ansible_hostname}}.https.resource.access.log cache;
+		try_files $uri @cachetomcat;
+	}
+
+	location @cachetomcat {
+		proxy_pass        		http://127.0.0.1:8080;
+		proxy_cache  			casicloud;
+		add_header  			Nginx-Cache "$upstream_cache_status";
+		proxy_redirect    		off;
+		proxy_set_header  		Host             $host;
+		proxy_set_header  		X-Real-IP        $remote_addr;
+		proxy_set_header  		X-Forwarded-For  $proxy_add_x_forwarded_for;
+		proxy_cache_key 		$host$uri$is_args$args;
+		proxy_cache_valid 		200 302 20m;
+		proxy_http_version		1.1;
+		proxy_ignore_headers 	"Set-Cookie";
+		proxy_ignore_headers 	"Cache-Control";
+		proxy_ignore_headers 	"Vary";
+	}
+
+	#monitor
+	location /nginx_status  {
+		include acl.conf;
+		error_log	off;
+		access_log	off;
+		stub_status on;
+	}
+
+	location = /robots.txt {
+		default_type text/plain;
+		access_log	off;
+		echo "User-Agent: *";
+		#echo "Disallow: /";
+	}
+}
