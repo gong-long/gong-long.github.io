@@ -1,8 +1,0 @@
----
-#- debug: msg="{{ hostvars[inventory_hostname]['inner_ip']}}"
-
-- name: Copy template config files
-  template: src=templates/squid.conf.j2 dest=/etc/squid/squid.conf mode=0644
-
-- name: Restart squid
-  service: name=squid state=restarted
